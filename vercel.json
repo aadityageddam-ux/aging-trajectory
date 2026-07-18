@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm ci",
+  "regions": ["iad1"],
+  "env": {
+    "NEXT_PUBLIC_APP_NAME": "AgingTrajectory",
+    "NEXT_PUBLIC_APP_URL": "https://aging-trajectory.vercel.app"
+  }
+}
