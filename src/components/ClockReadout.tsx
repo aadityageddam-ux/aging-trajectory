@@ -1,72 +1,28 @@
-'use client'
-
 import type { Checkpoint } from '@/lib/simulation/trajectory'
-import { PROXY_LABEL } from '@/lib/simulation/grimage-proxy'
 
-function accelText(age: number, clockAge: number) {
-  const d = Math.round((clockAge - age) * 10) / 10
-  if (d > 0) return { text: `+${d.toFixed(1)} yr older`, color: '#DC2626' }
-  if (d < 0) return { text: `${d.toFixed(1)} yr younger`, color: '#16A34A' }
-  return { text: 'on par', color: '#71717A' }
-}
-
-export function ClockReadout({ checkpoint }: { checkpoint: Checkpoint }) {
-  const { chronologicalAge, phenoAge, grimProxyAge, grim } = checkpoint
-  const phenoAccel = accelText(chronologicalAge, phenoAge)
-  const grimAccel = accelText(chronologicalAge, grimProxyAge)
-
+export function ClockReadout({ baseline, edited }: { baseline: Checkpoint; edited: Checkpoint }) {
+  const delta = edited.phenotypicAge - baseline.phenotypicAge
   return (
-    <div className="rounded-xl border border-[#E4E4E7] bg-white p-4 sm:p-6">
-      <h2 className="mb-4 text-sm font-semibold text-[#18181B]">
-        At year {checkpoint.yearIndex}
-      </h2>
-
-      <div className="grid grid-cols-3 gap-3">
-        <Metric label="Chronological" value={chronologicalAge} color="#71717A" />
-        <Metric label="PhenoAge" value={phenoAge} color="#16A34A" sub={phenoAccel} />
-        <Metric label={PROXY_LABEL} value={grimProxyAge} color="#6366F1" sub={grimAccel} />
+    <section className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6" aria-labelledby="readout-heading">
+      <h2 id="readout-heading" className="text-sm font-semibold text-zinc-950">At year {baseline.yearIndex}</h2>
+      <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3">
+        <Metric label="Chronological age" value={baseline.chronologicalAge} color="text-zinc-600" />
+        <Metric label="Baseline Phenotypic Age" value={baseline.phenotypicAge} color="text-indigo-800" />
+        <Metric label="Edited Phenotypic Age" value={edited.phenotypicAge} color="text-emerald-800" />
       </div>
-
-      <div className="mt-4 border-t border-[#F1F1F3] pt-3">
-        <p className="mb-1.5 text-[0.7rem] font-medium tracking-wide text-[#A1A1AA] uppercase">
-          Proxy breakdown (years added)
-        </p>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-[#71717A]">
-          <span>smoking {fmt(grim.terms.smoking)}</span>
-          <span>inflammation {fmt(grim.terms.inflammation)}</span>
-          <span>sex {fmt(grim.terms.sex)}</span>
-        </div>
-      </div>
-    </div>
+      <p className="mt-5 border-t border-zinc-100 pt-4 text-sm text-zinc-600">
+        Edited minus baseline: <span className="font-mono font-semibold text-zinc-950">{delta >= 0 ? '+' : ''}{delta.toFixed(1)} years</span>
+      </p>
+      <p className="mt-1 text-xs leading-5 text-zinc-500">This difference is a formula response to synthetic inputs, not an individualized forecast or causal effect.</p>
+    </section>
   )
 }
 
-function fmt(n: number) {
-  return `${n >= 0 ? '+' : ''}${n.toFixed(1)}`
-}
-
-function Metric({
-  label,
-  value,
-  color,
-  sub,
-}: {
-  label: string
-  value: number
-  color: string
-  sub?: { text: string; color: string }
-}) {
+function Metric({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div>
-      <p className="mb-1 text-[0.7rem] leading-tight text-[#71717A]">{label}</p>
-      <p className="font-serif text-3xl leading-none italic" style={{ color }}>
-        {value.toFixed(1)}
-      </p>
-      {sub && (
-        <p className="mt-1 text-[0.7rem]" style={{ color: sub.color }}>
-          {sub.text}
-        </p>
-      )}
+      <p className="min-h-9 text-xs leading-5 text-zinc-500">{label}</p>
+      <p className={`font-serif text-3xl italic ${color}`}>{value.toFixed(1)}</p>
     </div>
   )
 }

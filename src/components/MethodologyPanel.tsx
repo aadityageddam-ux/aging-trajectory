@@ -1,100 +1,29 @@
-'use client'
-
-import { PROXY_CONSTANTS, PROXY_DISCLAIMER } from '@/lib/simulation/grimage-proxy'
-
-const CITATIONS = [
-  {
-    label: 'PhenoAge',
-    title: 'An epigenetic biomarker of aging for lifespan and healthspan',
-    authors: 'Levine ME, Lu AT, Quach A, et al.',
-    journal: 'Aging (Albany NY)',
-    year: '2018',
-    pmid: '29676998',
-    url: 'https://doi.org/10.18632/aging.101414',
-  },
-  {
-    label: 'GrimAge',
-    title: 'DNA methylation GrimAge strongly predicts lifespan and healthspan',
-    authors: 'Lu AT, Quach A, Wilson JG, et al.',
-    journal: 'Aging (Albany NY)',
-    year: '2019',
-    pmid: '30669119',
-    url: 'https://doi.org/10.18632/aging.101684',
-  },
-]
-
 export function MethodologyPanel() {
   return (
-    <details className="group rounded-xl border border-[#E4E4E7] bg-white p-4 sm:p-6">
-      <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-[#18181B]">
-        Methodology &amp; scientific honesty
-        <span className="text-[#A1A1AA] transition-transform group-open:rotate-180">▾</span>
-      </summary>
-
-      <div className="mt-4 space-y-4 text-xs leading-relaxed text-[#71717A]">
-        <div className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[#991B1B]">
-          <span className="font-semibold">This is a synthetic, pedagogical simulator — not a diagnostic instrument. </span>
-          No real patient data is used, and nothing here is medical advice. Biomarker trajectories are
-          invented to build intuition for how two aging clocks can disagree.
-        </div>
-
-        <div>
-          <p className="mb-1 font-semibold text-[#18181B]">PhenoAge (Levine et al., 2018)</p>
-          <p>
-            Computed from the published clinical algorithm: a Gompertz mortality model over albumin,
-            creatinine, glucose, CRP (log), lymphocyte %, MCV, RDW, alkaline phosphatase, WBC, and
-            chronological age. Inputs are entered in US lab units and converted to the SI units the
-            coefficients require. Coefficients were verified against the source paper (Table 1).
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-1 font-semibold text-[#4338CA]">
-            GrimAge — illustrative proxy (NOT the validated algorithm)
-          </p>
-          <p className="mb-2">{PROXY_DISCLAIMER}</p>
-          <p className="mb-1 font-medium text-[#18181B]">Exact proxy formula used here:</p>
-          <pre className="overflow-x-auto rounded-lg bg-[#F8F8F7] px-3 py-2 font-mono text-[0.7rem] text-[#3F3F46]">
-{`proxyAge = age
-  + min(${PROXY_CONSTANTS.yearsPerPackYear} × packYears, ${PROXY_CONSTANTS.smokeCapYears})           // smoking
-  + clamp(${PROXY_CONSTANTS.yearsPerCrpDoubling} × log2(CRP / ${PROXY_CONSTANTS.crpReferenceMgL}), ${PROXY_CONSTANTS.inflMinYears}, ${PROXY_CONSTANTS.inflMaxYears})  // inflammation (shared CRP)
-  + (male ? +${PROXY_CONSTANTS.maleOffsetYears} : 0)                    // sex`}
-          </pre>
-          <p className="mt-2">
-            Tuned so a healthy never-smoker female reads ≈ chronological age. Smoking is the dominant
-            lever, matching the direction (not the exact values) of published GrimAge behavior.
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-1 font-semibold text-[#18181B]">Interventions</p>
-          <p>
-            Where a scenario asserts an intervention effect (e.g. rapamycin), treat it as a hypothetical.
-            Human outcome evidence for mTOR-inhibition slowing aging is preliminary and contested.
-          </p>
-        </div>
-
-        <div>
-          <p className="mb-2 font-semibold text-[#18181B]">Citations</p>
-          <ul className="space-y-2">
-            {CITATIONS.map((c) => (
-              <li key={c.pmid}>
-                <a
-                  href={c.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-[#3F3F46] underline underline-offset-2 hover:text-[#18181B]"
-                >
-                  {c.title}
-                </a>
-                <span className="block text-[#71717A]">
-                  {c.authors} · <span className="italic">{c.journal}</span> {c.year} · PMID:{' '}
-                  <span className="font-mono">{c.pmid}</span>
-                </span>
-              </li>
-            ))}
+    <details className="rounded-2xl border border-zinc-200 bg-white p-4 sm:p-6">
+      <summary className="cursor-pointer text-sm font-semibold text-zinc-950">Method, units, and limitations</summary>
+      <div className="mt-4 space-y-5 text-sm leading-6 text-zinc-600">
+        <section>
+          <h3 className="font-semibold text-zinc-950">What is calculated</h3>
+          <p className="mt-1">The app implements the original clinical Phenotypic Age equation reported by Levine and colleagues: nine clinical biomarkers and chronological age feed a Gompertz mortality model, whose 10-year risk is mapped back to an age scale.</p>
+          <p className="mt-2">This clinical measure was used as the target for the paper’s later DNA-methylation model. This app does not calculate DNAm PhenoAge or any epigenetic clock.</p>
+        </section>
+        <section>
+          <h3 className="font-semibold text-zinc-950">Required units and transformations</h3>
+          <p className="mt-1">The interface accepts albumin in g/dL, creatinine and glucose in mg/dL, and CRP in mg/L. It converts albumin to g/L, creatinine to µmol/L, glucose to mmol/L, and CRP to mg/dL before taking the natural logarithm. All nine biomarkers are required; no values are imputed.</p>
+        </section>
+        <section>
+          <h3 className="font-semibold text-zinc-950">What the trajectories mean</h3>
+          <p className="mt-1">Every trajectory is synthetic. Input patterns are fixed arithmetic rules, not models fitted to longitudinal people or interventions. An edited-minus-baseline difference shows the equation’s sensitivity to those inputs. It does not estimate a personal future, treatment effect, or causal aging rate.</p>
+        </section>
+        <section>
+          <h3 className="font-semibold text-zinc-950">Sources</h3>
+          <ul className="mt-2 space-y-3">
+            <li><a className="font-medium text-indigo-800 underline underline-offset-2" href="https://doi.org/10.18632/aging.101414" target="_blank" rel="noreferrer">Levine et al. (2018), An epigenetic biomarker of aging for lifespan and healthspan</a><span className="block text-xs text-zinc-500">Primary paper · PMID 29676998</span></li>
+            <li><a className="font-medium text-indigo-800 underline underline-offset-2" href="https://www.aging-us.com/article/101414/supplementary/SD1/0/aging-v10i4-101414-supplementary-material-SD1.pdf" target="_blank" rel="noreferrer">Levine et al. supplementary methods</a><span className="block text-xs text-zinc-500">Equation, parameters, development cohorts, and derivation</span></li>
+            <li><a className="font-medium text-indigo-800 underline underline-offset-2" href="https://doi.org/10.1007/s11357-021-00480-5" target="_blank" rel="noreferrer">Kwon and Belsky (2021), BioAge toolkit</a><span className="block text-xs text-zinc-500">Independent open-source reproduction used for parameter cross-checking</span></li>
           </ul>
-        </div>
+        </section>
       </div>
     </details>
   )

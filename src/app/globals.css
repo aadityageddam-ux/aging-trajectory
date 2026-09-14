@@ -1,25 +1,9 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-jetbrains-mono);
-  --font-serif: var(--font-instrument-serif);
-}
-
-:root {
-  /* AgingTrajectory brand tokens (warm-neutral, matching the sibling tools) */
-  --at-bg: #FAFAFA;
-  --at-surface: #FFFFFF;
-  --at-border: #E4E4E7;
-  --at-text: #18181B;
-  --at-muted: #71717A;
-
-  /* Clock series colors */
-  --at-chrono: #71717A;   /* grey, dashed reference */
-  --at-pheno: #16A34A;    /* green */
-  --at-proxy: #6366F1;    /* indigo — "the other clock" */
-  --at-diverge: #FEF3C7;  /* amber shading */
-  --at-diverge-line: #D97706;
+  --font-sans: Arial, Helvetica, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
 }
 
 @layer base {
@@ -27,7 +11,7 @@
     @apply font-sans antialiased;
   }
   body {
-    background: var(--at-bg);
-    color: var(--at-text);
+    background: #fafaf9;
+    color: #18181b;
   }
 }
