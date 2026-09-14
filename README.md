@@ -2,6 +2,8 @@
 
 An educational sensitivity simulator for the published clinical Phenotypic Age equation. It shows how explicitly synthetic biomarker sequences change the equation’s output over time.
 
+[Open the live simulator](https://aging-trajectory.vercel.app/).
+
 The app compares two calculations:
 
 - **Baseline:** the selected artificial input pattern.
