@@ -1,177 +1,94 @@
-/**
- * Trajectory engine: evolve a synthetic patient's biomarkers year by year and score
- * PhenoAge + the illustrative GrimAge proxy at each annual checkpoint.
- */
+import { computeClinicalPhenoAge } from '@/lib/computation/phenoage'
+import type { BiomarkerKey, ClinicalPhenoAgeInput } from '@/types/biomarkers'
+import { evolvePattern, type InputPattern } from './presets'
 
-import type { BiomarkerInput } from '@/types/biomarkers'
-import { computePhenoAge } from '@/lib/computation/phenoage'
-import { computeGrimAgeProxy, type GrimAgeProxyResult } from './grimage-proxy'
-
-/** Full biomarker + demographic state at one checkpoint (all US units; all 9 markers present). */
-export interface PatientState {
-  age: number
-  sex: 'male' | 'female'
-  /** Cumulative smoking pack-years */
-  packYears: number
-  albumin: number
-  creatinine: number
-  glucose: number
-  crp: number
-  lymphocytePct: number
-  mcv: number
-  rdw: number
-  alp: number
-  wbc: number
-}
-
-/** The 9 editable biomarker keys plus pack-years (things the manual editor can change). */
-export const EDITABLE_KEYS = [
-  'albumin',
-  'creatinine',
-  'glucose',
-  'crp',
-  'lymphocytePct',
-  'mcv',
-  'rdw',
-  'alp',
-  'wbc',
-  'packYears',
-] as const
-export type EditableKey = (typeof EDITABLE_KEYS)[number]
-
-export interface Preset {
-  id: string
-  name: string
-  /** One-line description shown in the selector */
-  blurb: string
-  /** Longer scenario description for the info area */
-  detail: string
-  /** Optional scientific caveat (e.g. rapamycin evidence is preliminary/contested) */
-  caveat?: string
-  /** Year-0 state */
-  initial: PatientState
-  /**
-   * Evolve one year forward. Given the previous year's state and the absolute index
-   * of the year being produced (1..horizon), return the next state. Deterministic.
-   */
-  step: (prev: PatientState, yearIndex: number) => PatientState
-}
+export type BiomarkerEdits = Partial<Record<BiomarkerKey, number>>
 
 export interface Checkpoint {
-  /** 0..horizon */
   yearIndex: number
-  state: PatientState
+  state: ClinicalPhenoAgeInput
   chronologicalAge: number
-  phenoAge: number
-  grimProxyAge: number
-  grim: GrimAgeProxyResult
-  /** True if this checkpoint lies at or after a user branch point */
-  branched: boolean
+  phenotypicAge: number
 }
 
 export interface Trajectory {
-  presetId: string
+  patternId: string
   horizon: number
-  checkpoints: Checkpoint[]
-  branched: boolean
-  /** Earliest year the user edited, or null if unbranched */
+  baseline: Checkpoint[]
+  edited: Checkpoint[]
+  edits: Record<number, BiomarkerEdits>
   branchYear: number | null
 }
 
-const round1 = (n: number) => Math.round(n * 10) / 10
-
-/** Convert a PatientState into the PhenoAge input shape. */
-function toBiomarkerInput(s: PatientState): BiomarkerInput {
-  return {
-    age: s.age,
-    sex: s.sex,
-    albumin: s.albumin,
-    creatinine: s.creatinine,
-    glucose: s.glucose,
-    crp: s.crp,
-    lymphocytePct: s.lymphocytePct,
-    mcv: s.mcv,
-    rdw: s.rdw,
-    alp: s.alp,
-    wbc: s.wbc,
-  }
-}
-
-/** Score both clocks for a given state. */
-function scoreState(state: PatientState, yearIndex: number, branched: boolean): Checkpoint {
-  const pheno = computePhenoAge(toBiomarkerInput(state))
-  const grim = computeGrimAgeProxy({
-    age: state.age,
-    sex: state.sex,
-    packYears: state.packYears,
-    crp: state.crp,
-  })
+function scoreState(state: ClinicalPhenoAgeInput, yearIndex: number): Checkpoint {
+  const result = computeClinicalPhenoAge(state)
   return {
     yearIndex,
-    state,
+    state: { ...state },
     chronologicalAge: state.age,
-    phenoAge: round1(pheno.biologicalAge),
-    grimProxyAge: grim.proxyAge,
-    grim,
-    branched,
+    phenotypicAge: result.phenotypicAge,
   }
 }
 
-/**
- * Generate a full trajectory from a preset over `horizon` years (annual checkpoints,
- * years 0..horizon).
- */
-export function generateTrajectory(preset: Preset, horizon: number): Trajectory {
-  const checkpoints: Checkpoint[] = []
-  let state = preset.initial
-  checkpoints.push(scoreState(state, 0, false))
-
-  for (let y = 1; y <= horizon; y++) {
-    state = preset.step(state, y)
-    checkpoints.push(scoreState(state, y, false))
-  }
-
-  return { presetId: preset.id, horizon, checkpoints, branched: false, branchYear: null }
+function applyEdits(state: ClinicalPhenoAgeInput, edits?: BiomarkerEdits) {
+  return edits ? { ...state, ...edits } : state
 }
 
-/**
- * Apply a manual override at a checkpoint year: the edited values become the new
- * baseline at that year, and the preset's per-year evolution continues forward from
- * the edited state. Years before the edit are untouched. The trajectory is flagged
- * "branched" from the earliest edited year onward.
- */
-export function applyOverride(
-  trajectory: Trajectory,
-  preset: Preset,
-  yearIndex: number,
-  edits: Partial<Record<EditableKey, number>>,
+export function generateTrajectory(
+  pattern: InputPattern,
+  horizon: number,
+  edits: Record<number, BiomarkerEdits> = {},
 ): Trajectory {
-  if (yearIndex < 0 || yearIndex > trajectory.horizon) return trajectory
+  const baseline: Checkpoint[] = []
+  const edited: Checkpoint[] = []
+  let baselineState = { ...pattern.initial }
+  let editedState = applyEdits({ ...pattern.initial }, edits[0])
 
-  const before = trajectory.checkpoints.slice(0, yearIndex)
-  const branchYear =
-    trajectory.branchYear === null ? yearIndex : Math.min(trajectory.branchYear, yearIndex)
+  baseline.push(scoreState(baselineState, 0))
+  edited.push(scoreState(editedState, 0))
 
-  // Build the edited baseline state at yearIndex (age/sex preserved).
-  const baseState = trajectory.checkpoints[yearIndex]!.state
-  let state: PatientState = { ...baseState }
-  for (const [k, v] of Object.entries(edits)) {
-    if (v != null && isFinite(v)) {
-      ;(state as unknown as Record<string, number>)[k] = v
-    }
+  for (let year = 1; year <= horizon; year++) {
+    baselineState = evolvePattern(baselineState, pattern)
+    editedState = applyEdits(evolvePattern(editedState, pattern), edits[year])
+    baseline.push(scoreState(baselineState, year))
+    edited.push(scoreState(editedState, year))
   }
 
-  const checkpoints: Checkpoint[] = [...before, scoreState(state, yearIndex, true)]
-
-  for (let y = yearIndex + 1; y <= trajectory.horizon; y++) {
-    state = preset.step(state, y)
-    checkpoints.push(scoreState(state, y, true))
-  }
+  const visibleEditYears = Object.keys(edits)
+    .map(Number)
+    .filter((year) => year <= horizon)
 
   return {
-    ...trajectory,
-    checkpoints,
-    branched: true,
-    branchYear,
+    patternId: pattern.id,
+    horizon,
+    baseline,
+    edited,
+    edits,
+    branchYear: visibleEditYears.length ? Math.min(...visibleEditYears) : null,
   }
+}
+
+export function applyOverride(
+  trajectory: Trajectory,
+  pattern: InputPattern,
+  yearIndex: number,
+  values: BiomarkerEdits,
+): Trajectory {
+  if (!Number.isInteger(yearIndex) || yearIndex < 0 || yearIndex > trajectory.horizon) {
+    throw new RangeError('Edited year is outside the visible trajectory.')
+  }
+
+  const edits = {
+    ...trajectory.edits,
+    [yearIndex]: { ...trajectory.edits[yearIndex], ...values },
+  }
+  return generateTrajectory(pattern, trajectory.horizon, edits)
+}
+
+export function resizeTrajectory(
+  trajectory: Trajectory,
+  pattern: InputPattern,
+  horizon: number,
+): Trajectory {
+  return generateTrajectory(pattern, horizon, trajectory.edits)
 }

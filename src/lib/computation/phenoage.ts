@@ -1,230 +1,87 @@
-/**
- * PhenoAge biological age algorithm.
- *
- * Reference:
- *   Levine ME, Lu AT, Quach A, et al.
- *   "An epigenetic biomarker of aging for lifespan and healthspan."
- *   Aging (Albany NY). 2018;10(4):573–591. PMID: 29676998
- *
- * Ported unchanged from the LabAge sibling app. Coefficients + SI units
- * re-verified against PMC5940111 Table 1.
- */
+import {
+  BIOMARKER_KEYS,
+  INPUT_LIMITS,
+  type ClinicalPhenoAgeInput,
+} from '@/types/biomarkers'
+import type { ClinicalPhenoAgeResult, ValidationIssue } from '@/types/computation'
 
-import type { BiomarkerInput, BiomarkerContribution, BiomarkerKey } from '@/types/biomarkers'
-import type { PhenoAgeResult } from '@/types/computation'
-import { BIOMARKER_KEYS } from '@/types/biomarkers'
-import { computeConfidence } from './confidence'
-
-// ─── Published Coefficients (Levine 2018 Table 1) ────────────────────────────
-//
-// IMPORTANT: These coefficients require SI units as input.
-// US-unit values must be converted via the helpers below before applying.
-
-const COEFF = {
-  intercept:     -19.9067,
-  albumin:        -0.0336,  // per g/L        (US input: g/dL × 10  → g/L)
-  creatinine:      0.0095,  // per μmol/L     (US input: mg/dL × 88.4 → μmol/L)
-  glucose:         0.1953,  // per mmol/L     (US input: mg/dL × 0.0555 → mmol/L)
-  crpLn:           0.0954,  // per ln(mg/dL)  (US input: mg/L × 0.1 → mg/dL, then ln)
-  lymphocytePct:  -0.0120,  // per %
-  mcv:             0.0268,  // per fL
-  rdw:             0.3306,  // per %
-  alp:             0.00188, // per U/L
-  wbc:             0.0554,  // per K/μL
-  age:             0.0804,  // per year
+// Original clinical Phenotypic Age parameters reproduced by the BioAge package.
+// Source: Levine et al. 2018 supplementary methods and Kwon & Belsky 2021.
+export const PHENOAGE_PARAMETERS = {
+  intercept: -19.90667,
+  albumin: -0.03359355,
+  creatinine: 0.009506491,
+  glucose: 0.1953192,
+  crpLn: 0.09536762,
+  lymphocytePct: -0.01199984,
+  mcv: 0.02676401,
+  rdw: 0.3306156,
+  alp: 0.001868778,
+  wbc: 0.05542406,
+  age: 0.08035356,
+  gompertzNumerator: 1.51714,
+  gompertzShape: 0.007692696,
+  ageScale: 0.090165,
+  ageMultiplier: 0.0055305,
+  ageIntercept: 141.50225,
 } as const
 
-// ─── Gompertz Mortality Model ─────────────────────────────────────────────────
-//
-// M = 1 − exp(−exp(xb) × (exp(γ × t) − 1) / γ)
+export function validateClinicalPhenoAgeInput(
+  input: ClinicalPhenoAgeInput,
+): ValidationIssue[] {
+  const fields = ['age', ...BIOMARKER_KEYS] as const
+  const issues: ValidationIssue[] = []
 
-const GOMPERTZ_GAMMA = 0.0076927
-const GOMPERTZ_T     = 120 // months
-
-const GOMPERTZ_FACTOR = (Math.exp(GOMPERTZ_GAMMA * GOMPERTZ_T) - 1) / GOMPERTZ_GAMMA
-
-// ─── Phenotypic Age Conversion ────────────────────────────────────────────────
-//
-// PhenoAge = α + ln(β × ln(1 − M)) / γ₂
-
-const PHENO_ALPHA = 141.50225
-const PHENO_BETA  = -0.00553
-const PHENO_GAMMA =  0.09165
-
-// ─── Population Means (fallback for missing biomarkers) ───────────────────────
-
-const POPULATION_MEANS = {
-  albumin:      4.1,  // g/dL
-  creatinine:   0.85, // mg/dL
-  glucose:      95,   // mg/dL
-  crp:          1.5,  // mg/L
-  lymphocytePct: 30,  // %
-  mcv:          90,   // fL
-  rdw:          13.0, // %
-  alp:          65,   // U/L
-  wbc:          6.5,  // K/μL
-} as const satisfies Record<BiomarkerKey, number>
-
-// ─── Display Metadata ─────────────────────────────────────────────────────────
-
-const BIOMARKER_META = {
-  albumin:       { displayName: 'Albumin',              unit: 'g/dL' },
-  creatinine:    { displayName: 'Creatinine',           unit: 'mg/dL' },
-  glucose:       { displayName: 'Glucose',              unit: 'mg/dL' },
-  crp:           { displayName: 'C-Reactive Protein',   unit: 'mg/L' },
-  lymphocytePct: { displayName: 'Lymphocyte %',         unit: '%' },
-  mcv:           { displayName: 'MCV',                  unit: 'fL' },
-  rdw:           { displayName: 'RDW',                  unit: '%' },
-  alp:           { displayName: 'Alkaline Phosphatase', unit: 'U/L' },
-  wbc:           { displayName: 'WBC',                  unit: 'K/μL' },
-} as const satisfies Record<BiomarkerKey, { displayName: string; unit: string }>
-
-// ─── Unit Conversion Helpers ──────────────────────────────────────────────────
-
-/** g/dL → g/L */
-const toGperL = (gDL: number) => gDL * 10
-
-/** mg/dL → μmol/L */
-const toUmolPerL = (mgDL: number) => mgDL * 88.4
-
-/** mg/dL → mmol/L */
-const toMmolPerL = (mgDL: number) => mgDL * 0.0555
-
-/**
- * CRP: mg/L → ln(mg/dL)
- * A minimum floor of 0.001 mg/dL prevents ln(0) = −Infinity.
- */
-const toCRPLn = (mgL: number) => Math.log(Math.max(mgL * 0.1, 0.001))
-
-// ─── Internal Resolved Shape ─────────────────────────────────────────────────
-
-type ResolvedBiomarkers = Record<BiomarkerKey, { value: number; imputed: boolean }>
-
-/** Build the Gompertz linear predictor (xb) from resolved US-unit biomarkers + age. */
-function buildXb(inputs: ResolvedBiomarkers, age: number): number {
-  return (
-    COEFF.intercept +
-    COEFF.albumin       * toGperL(inputs.albumin.value) +
-    COEFF.creatinine    * toUmolPerL(inputs.creatinine.value) +
-    COEFF.glucose       * toMmolPerL(inputs.glucose.value) +
-    COEFF.crpLn         * toCRPLn(inputs.crp.value) +
-    COEFF.lymphocytePct * inputs.lymphocytePct.value +
-    COEFF.mcv           * inputs.mcv.value +
-    COEFF.rdw           * inputs.rdw.value +
-    COEFF.alp           * inputs.alp.value +
-    COEFF.wbc           * inputs.wbc.value +
-    COEFF.age           * age
-  )
-}
-
-/** Gompertz 10-year mortality probability from linear predictor. */
-function mortalityFromXb(xb: number): number {
-  return 1 - Math.exp(-Math.exp(xb) * GOMPERTZ_FACTOR)
-}
-
-/**
- * Phenotypic age in years from 10-year Gompertz mortality probability.
- * Clamps M to 0.9999 to prevent ln(0) at extreme values.
- */
-function phenoAgeFromMortality(M: number): number {
-  const m = Math.min(M, 0.9999)
-  return PHENO_ALPHA + Math.log(PHENO_BETA * Math.log(1 - m)) / PHENO_GAMMA
-}
-
-/**
- * Per-biomarker contributions in biological-age-years.
- *
- * Contribution of biomarker k = PhenoAge(actual) − PhenoAge(k replaced by population mean).
- */
-function buildContributions(
-  inputs: ResolvedBiomarkers,
-  age: number,
-): BiomarkerContribution[] {
-  const baselineAge = phenoAgeFromMortality(mortalityFromXb(buildXb(inputs, age)))
-
-  return BIOMARKER_KEYS.map((key): BiomarkerContribution => {
-    const { value, imputed } = inputs[key]
-
-    const withMean: ResolvedBiomarkers = {
-      ...inputs,
-      [key]: { value: POPULATION_MEANS[key], imputed: true },
-    }
-    const meanAge = phenoAgeFromMortality(mortalityFromXb(buildXb(withMean, age)))
-    const contribution = round1(baselineAge - meanAge)
-
-    return {
-      key,
-      displayName: BIOMARKER_META[key].displayName,
-      value,
-      unit: BIOMARKER_META[key].unit,
-      contribution,
-      imputed,
-    }
-  })
-}
-
-// ─── Public API ───────────────────────────────────────────────────────────────
-
-/**
- * Compute biological age using the PhenoAge algorithm (Levine et al., 2018).
- *
- * @param input  Blood panel values in US units. Age and sex are required.
- */
-export function computePhenoAge(input: BiomarkerInput): PhenoAgeResult {
-  const missingBiomarkers: BiomarkerKey[] = []
-  const resolved = {} as ResolvedBiomarkers
-
-  for (const key of BIOMARKER_KEYS) {
-    const val = input[key]
-    if (val != null && isFinite(val)) {
-      resolved[key] = { value: val, imputed: false }
-    } else {
-      missingBiomarkers.push(key)
-      resolved[key] = { value: POPULATION_MEANS[key], imputed: true }
+  for (const field of fields) {
+    const value = input[field]
+    const limits = INPUT_LIMITS[field]
+    if (!Number.isFinite(value)) {
+      issues.push({ field, message: `${limits.label} must be a number.` })
+    } else if (value < limits.min || value > limits.max) {
+      issues.push({
+        field,
+        message: `${limits.label} must be between ${limits.min} and ${limits.max} ${limits.unit}.`,
+      })
     }
   }
 
-  const presentCount = BIOMARKER_KEYS.length - missingBiomarkers.length
-  const confidence = computeConfidence(presentCount)
+  return issues
+}
 
-  if (confidence === 'INSUFFICIENT') {
-    return {
-      biologicalAge:      NaN,
-      chronologicalAge:   input.age,
-      acceleration:       NaN,
-      mortalityScore:     NaN,
-      linearPredictor:    NaN,
-      presentCount,
-      totalCount:         9,
-      confidence,
-      contributions:      [],
-      missingBiomarkers,
-    }
+export function computeClinicalPhenoAge(
+  input: ClinicalPhenoAgeInput,
+): ClinicalPhenoAgeResult {
+  const issues = validateClinicalPhenoAgeInput(input)
+  if (issues.length > 0) {
+    throw new RangeError(issues.map((issue) => issue.message).join(' '))
   }
 
-  const xb           = buildXb(resolved, input.age)
-  const mortalityScore = mortalityFromXb(xb)
-  const biologicalAge  = phenoAgeFromMortality(mortalityScore)
-  const contributions  = buildContributions(resolved, input.age)
+  const p = PHENOAGE_PARAMETERS
+  const linearPredictor =
+    p.intercept +
+    p.albumin * (input.albumin * 10) +
+    p.creatinine * (input.creatinine * 88.4017) +
+    p.glucose * (input.glucose * 0.0555) +
+    p.crpLn * Math.log(input.crp * 0.1) +
+    p.lymphocytePct * input.lymphocytePct +
+    p.mcv * input.mcv +
+    p.rdw * input.rdw +
+    p.alp * input.alp +
+    p.wbc * input.wbc +
+    p.age * input.age
+
+  // Direct cumulative-hazard calculation avoids precision loss near risks of 0 or 1.
+  const cumulativeHazard =
+    (p.gompertzNumerator * Math.exp(linearPredictor)) / p.gompertzShape
+  const tenYearMortalityRisk = -Math.expm1(-cumulativeHazard)
+  const phenotypicAge =
+    p.ageIntercept + Math.log(p.ageMultiplier * cumulativeHazard) / p.ageScale
 
   return {
-    biologicalAge:    round1(biologicalAge),
     chronologicalAge: input.age,
-    acceleration:     round1(biologicalAge - input.age),
-    mortalityScore,
-    linearPredictor:  xb,
-    presentCount,
-    totalCount:       9,
-    confidence,
-    contributions,
-    missingBiomarkers,
+    phenotypicAge,
+    difference: phenotypicAge - input.age,
+    tenYearMortalityRisk,
+    linearPredictor,
   }
 }
-
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
-function round1(n: number): number {
-  return Math.round(n * 10) / 10
-}
-
-export { POPULATION_MEANS, BIOMARKER_META }

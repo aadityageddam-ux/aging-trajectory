@@ -1,80 +1,46 @@
-import { describe, it, expect } from 'vitest'
-import {
-  generateTrajectory,
-  applyOverride,
-} from '@/lib/simulation/trajectory'
-import { getPreset, QUIT_YEAR } from '@/lib/simulation/presets'
-import { annotateDivergence } from '@/lib/simulation/divergence'
+import { describe, expect, it } from 'vitest'
+import { getInputPattern } from '@/lib/simulation/presets'
+import { applyOverride, generateTrajectory, resizeTrajectory } from '@/lib/simulation/trajectory'
 
-const sedentary = getPreset('sedentary-decline')
-const smoking = getPreset('smoking-cessation')
+const fixed = getInputPattern('fixed')
 
-describe('generateTrajectory', () => {
-  it('produces horizon+1 annual checkpoints', () => {
-    const t = generateTrajectory(sedentary, 10)
-    expect(t.checkpoints).toHaveLength(11)
-    expect(t.checkpoints[0]!.yearIndex).toBe(0)
-    expect(t.checkpoints[10]!.yearIndex).toBe(10)
+describe('synthetic trajectory', () => {
+  it('generates one baseline and edited checkpoint per year', () => {
+    const trajectory = generateTrajectory(fixed, 10)
+    expect(trajectory.baseline).toHaveLength(11)
+    expect(trajectory.edited).toHaveLength(11)
+    expect(trajectory.edited.map((point) => point.phenotypicAge)).toEqual(trajectory.baseline.map((point) => point.phenotypicAge))
   })
 
-  it('advances chronological age by exactly one year per checkpoint', () => {
-    const t = generateTrajectory(sedentary, 12)
-    for (let i = 1; i < t.checkpoints.length; i++) {
-      expect(t.checkpoints[i]!.chronologicalAge).toBe(
-        t.checkpoints[i - 1]!.chronologicalAge + 1,
-      )
-    }
+  it('applies an edit at one year and propagates it without changing earlier years', () => {
+    const original = generateTrajectory(fixed, 10)
+    const edited = applyOverride(original, fixed, 5, { glucose: 150 })
+    expect(edited.branchYear).toBe(5)
+    expect(edited.edited[4]!.phenotypicAge).toBe(edited.baseline[4]!.phenotypicAge)
+    expect(edited.edited[5]!.state.glucose).toBe(150)
+    expect(edited.edited[8]!.state.glucose).toBe(150)
+    expect(edited.edited[5]!.phenotypicAge).toBeGreaterThan(edited.baseline[5]!.phenotypicAge)
   })
 
-  it('is unbranched on generation', () => {
-    const t = generateTrajectory(sedentary, 10)
-    expect(t.branched).toBe(false)
-    expect(t.branchYear).toBeNull()
-  })
-})
-
-describe('smoking-cessation preset', () => {
-  it('accumulates pack-years until the quit year, then flattens', () => {
-    const t = generateTrajectory(smoking, 15)
-    const pyAtQuit = t.checkpoints[QUIT_YEAR]!.state.packYears
-    const pyLater = t.checkpoints[15]!.state.packYears
-    expect(pyAtQuit).toBeGreaterThan(t.checkpoints[0]!.state.packYears)
-    // no accumulation after quitting
-    expect(pyLater).toBe(pyAtQuit)
+  it('retains multiple edits and the earliest visible branch', () => {
+    const first = applyOverride(generateTrajectory(fixed, 10), fixed, 6, { glucose: 140 })
+    const second = applyOverride(first, fixed, 3, { crp: 8 })
+    expect(second.branchYear).toBe(3)
+    expect(second.edits[6]!.glucose).toBe(140)
+    expect(second.edits[3]!.crp).toBe(8)
   })
 
-  it('drives a visible divergence the annotator picks up', () => {
-    const t = generateTrajectory(smoking, 15)
-    const ann = annotateDivergence(t.checkpoints)
-    expect(ann).not.toBeNull()
-    expect(ann!.grimHigher).toBe(true) // proxy older than PhenoAge
-  })
-})
-
-describe('applyOverride (branching)', () => {
-  it('flags the trajectory branched from the edited year and recomputes forward', () => {
-    const base = generateTrajectory(sedentary, 10)
-    const before = base.checkpoints[3]!.grimProxyAge
-    const branched = applyOverride(base, sedentary, 5, { crp: 12 })
-
-    expect(branched.branched).toBe(true)
-    expect(branched.branchYear).toBe(5)
-    // years before the edit are untouched
-    expect(branched.checkpoints[3]!.grimProxyAge).toBe(before)
-    expect(branched.checkpoints[3]!.branched).toBe(false)
-    // edited value is reflected and inflates the proxy at the edit year
-    expect(branched.checkpoints[5]!.state.crp).toBe(12)
-    expect(branched.checkpoints[5]!.branched).toBe(true)
-    // downstream still advances age by one per year
-    expect(branched.checkpoints[6]!.chronologicalAge).toBe(
-      branched.checkpoints[5]!.chronologicalAge + 1,
-    )
+  it('preserves edits when the horizon shrinks and expands', () => {
+    const edited = applyOverride(generateTrajectory(fixed, 20), fixed, 15, { rdw: 18 })
+    const shorter = resizeTrajectory(edited, fixed, 10)
+    expect(shorter.branchYear).toBeNull()
+    expect(shorter.edits[15]!.rdw).toBe(18)
+    const restored = resizeTrajectory(shorter, fixed, 20)
+    expect(restored.branchYear).toBe(15)
+    expect(restored.edited[15]!.state.rdw).toBe(18)
   })
 
-  it('keeps the earliest branch year across multiple edits', () => {
-    const base = generateTrajectory(sedentary, 10)
-    const b1 = applyOverride(base, sedentary, 6, { glucose: 150 })
-    const b2 = applyOverride(b1, sedentary, 3, { glucose: 160 })
-    expect(b2.branchYear).toBe(3)
+  it('rejects edits outside the visible trajectory', () => {
+    expect(() => applyOverride(generateTrajectory(fixed, 10), fixed, 11, { glucose: 100 })).toThrow(RangeError)
   })
 })

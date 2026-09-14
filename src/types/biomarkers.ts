@@ -1,11 +1,3 @@
-/**
- * Biomarker types for the trajectory simulator input/output.
- * All user-facing values are in US units (g/dL, mg/dL, mg/L, etc.)
- *
- * Ported unchanged from the LabAge sibling app so the PhenoAge computation
- * behaves identically across the ecosystem.
- */
-
 export const BIOMARKER_KEYS = [
   'albumin',
   'creatinine',
@@ -20,51 +12,28 @@ export const BIOMARKER_KEYS = [
 
 export type BiomarkerKey = (typeof BIOMARKER_KEYS)[number]
 
-/**
- * User-provided blood panel values.
- * Age and sex are required; all biomarkers are optional (missing ones are imputed).
- *
- * Units:
- *   albumin       g/dL
- *   creatinine    mg/dL
- *   glucose       mg/dL
- *   crp           mg/L
- *   lymphocytePct %
- *   mcv           fL
- *   rdw           %
- *   alp           U/L
- *   wbc           K/μL (thousands per microliter)
- */
-export interface BiomarkerInput {
-  /** Chronological age in years */
+export interface ClinicalPhenoAgeInput extends Record<BiomarkerKey, number> {
   age: number
-  /** Biological sex — used for the GrimAge proxy sex offset */
-  sex: 'male' | 'female'
-
-  albumin?: number
-  creatinine?: number
-  glucose?: number
-  crp?: number
-  lymphocytePct?: number
-  mcv?: number
-  rdw?: number
-  alp?: number
-  wbc?: number
 }
 
-/** Per-biomarker contribution to biological age from the PhenoAge computation */
-export interface BiomarkerContribution {
-  key: BiomarkerKey
-  displayName: string
-  /** Value used in computation (user-provided or imputed from population mean) */
-  value: number
+export interface FieldDefinition {
+  label: string
   unit: string
-  /**
-   * Years of biological age this biomarker adds/removes relative to population mean.
-   * Positive  = aging signal (above-mean harmful contribution)
-   * Negative  = protective signal (below-mean beneficial contribution)
-   */
-  contribution: number
-  /** True if value was substituted from population mean (not user-provided) */
-  imputed: boolean
+  min: number
+  max: number
+  step: number
+}
+
+/** Broad computational guardrails, not clinical reference intervals. */
+export const INPUT_LIMITS: Record<'age' | BiomarkerKey, FieldDefinition> = {
+  age: { label: 'Chronological age', unit: 'years', min: 20, max: 100, step: 1 },
+  albumin: { label: 'Albumin', unit: 'g/dL', min: 1, max: 6, step: 0.1 },
+  creatinine: { label: 'Creatinine', unit: 'mg/dL', min: 0.1, max: 15, step: 0.05 },
+  glucose: { label: 'Glucose', unit: 'mg/dL', min: 40, max: 600, step: 1 },
+  crp: { label: 'C-reactive protein', unit: 'mg/L', min: 0.01, max: 300, step: 0.1 },
+  lymphocytePct: { label: 'Lymphocytes', unit: '%', min: 0, max: 100, step: 0.5 },
+  mcv: { label: 'Mean corpuscular volume', unit: 'fL', min: 50, max: 130, step: 0.5 },
+  rdw: { label: 'Red cell distribution width', unit: '%', min: 5, max: 40, step: 0.1 },
+  alp: { label: 'Alkaline phosphatase', unit: 'U/L', min: 10, max: 1000, step: 1 },
+  wbc: { label: 'White blood cell count', unit: '10³/µL', min: 1, max: 100, step: 0.1 },
 }
